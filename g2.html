@@ -1,0 +1,670 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hill Climb Racing 3D</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+    background: #87ceeb;
+}
+
+canvas {
+    display: block;
+}
+
+#hud {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    color: white;
+    font-weight: bold;
+    font-size: 18px;
+    text-shadow: 2px 2px 3px black;
+    line-height: 1.8;
+    pointer-events: none;
+}
+
+#fuelBox {
+    width: 150px;
+    height: 13px;
+    background: #444;
+    border: 2px solid white;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+#fuelBar {
+    width: 100%;
+    height: 100%;
+    background: #31e65c;
+}
+
+#message {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    text-align: center;
+    background: rgba(0,0,0,.55);
+}
+
+#message h1 {
+    font-size: clamp(30px, 7vw, 60px);
+    color: #ffe45c;
+    text-shadow: 3px 3px 4px black;
+    margin-bottom: 8px;
+}
+
+#message p {
+    font-size: 17px;
+    padding: 0 20px;
+}
+
+#startBtn {
+    padding: 14px 35px;
+    border: none;
+    border-radius: 12px;
+    background: #ffb52e;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+#controls {
+    position: absolute;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 20px;
+    pointer-events: none;
+}
+
+.controlGroup {
+    display: flex;
+    gap: 12px;
+    pointer-events: auto;
+}
+
+.control {
+    width: 70px;
+    height: 70px;
+    border: 3px solid white;
+    border-radius: 50%;
+    background: rgba(0,0,0,.5);
+    color: white;
+    font-size: 27px;
+    font-weight: bold;
+    touch-action: none;
+}
+
+.control:active {
+    background: #ff9e24;
+}
+
+#help {
+    position: absolute;
+    bottom: 105px;
+    width: 100%;
+    text-align: center;
+    color: white;
+    font-size: 13px;
+    text-shadow: 1px 1px 3px black;
+    pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="hud">
+    🪙 Coins: <span id="coins">0</span><br>
+    📏 Distance: <span id="distance">0</span> m<br>
+    ⛽ Fuel:
+    <div id="fuelBox"><div id="fuelBar"></div></div>
+</div>
+
+<div id="help">← Reverse &nbsp; | &nbsp; → Accelerate &nbsp; | &nbsp; SPACE Jump</div>
+
+<div id="controls">
+    <div class="controlGroup">
+        <button class="control" id="reverse">◀</button>
+    </div>
+    <div class="controlGroup">
+        <button class="control" id="jump">⬆</button>
+        <button class="control" id="forward">▶</button>
+    </div>
+</div>
+
+<div id="message">
+    <h1>HILL CLIMB 3D</h1>
+    <p>Drive your jeep, collect coins and fuel, and cross the hills!</p>
+    <button id="startBtn">START GAME</button>
+</div>
+
+<script type="module">
+import * as THREE from
+'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+// SCENE
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 35, 100);
+
+const camera = new THREE.PerspectiveCamera(
+    55, window.innerWidth / window.innerHeight, 0.1, 500
+);
+
+camera.position.set(0, 7, 20);
+camera.lookAt(0, 2, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// LIGHTING
+scene.add(new THREE.HemisphereLight(0xffffff, 0x52713b, 2));
+
+const sunlight = new THREE.DirectionalLight(0xffffff, 2);
+sunlight.position.set(5, 15, 10);
+sunlight.castShadow = true;
+scene.add(sunlight);
+
+// MATERIALS
+const green = new THREE.MeshStandardMaterial({color:0x4b9d35});
+const darkGreen = new THREE.MeshStandardMaterial({color:0x286a29});
+const yellow = new THREE.MeshStandardMaterial({color:0xffc928});
+const black = new THREE.MeshStandardMaterial({color:0x222222});
+const metal = new THREE.MeshStandardMaterial({color:0xbac7d1});
+const red = new THREE.MeshStandardMaterial({color:0xe83b32});
+
+// TERRAIN
+function groundHeight(x) {
+    return 0.5 +
+        Math.sin(x * 0.018) * 1.5 +
+        Math.sin(x * 0.045) * 0.55 +
+        Math.sin(x * 0.008) * 1.2;
+}
+
+function makeTerrain() {
+    const geometry = new THREE.PlaneGeometry(4000, 18, 800, 1);
+    geometry.rotateX(-Math.PI / 2);
+
+    const positions = geometry.attributes.position;
+
+    for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i);
+        const z = positions.getZ(i);
+        positions.setY(i, groundHeight(x) - Math.abs(z) * 0.025);
+    }
+
+    geometry.computeVertexNormals();
+
+    const terrain = new THREE.Mesh(geometry, green);
+    terrain.position.x = 1500;
+    terrain.position.z = -2;
+    terrain.receiveShadow = true;
+    scene.add(terrain);
+
+    // A deeper layer below the ground
+    const base = new THREE.Mesh(
+        new THREE.BoxGeometry(4000, 10, 20),
+        darkGreen
+    );
+    base.position.set(1500, -5, -2);
+    scene.add(base);
+}
+
+makeTerrain();
+
+// DISTANT HILLS
+for (let i = 0; i < 16; i++) {
+    const hill = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 20, 16),
+        new THREE.MeshStandardMaterial({color: i % 2 ? 0x6aa85a : 0x83b86c})
+    );
+
+    hill.scale.set(12 + Math.random()*8, 5 + Math.random()*5, 2);
+    hill.position.set(i * 28 - 20, 4, -15);
+    scene.add(hill);
+}
+
+// CLOUDS
+for (let i = 0; i < 15; i++) {
+    const cloud = new THREE.Group();
+
+    for (let j = 0; j < 4; j++) {
+        const part = new THREE.Mesh(
+            new THREE.SphereGeometry(1.2, 16, 12),
+            new THREE.MeshStandardMaterial({color:0xffffff})
+        );
+        part.position.set(j * 1.3, Math.random() * .5, 0);
+        part.scale.set(1.3, .7, .6);
+        cloud.add(part);
+    }
+
+    cloud.position.set(i * 25, 10 + Math.random()*5, -12);
+    scene.add(cloud);
+}
+
+// JEEP
+const car = new THREE.Group();
+scene.add(car);
+
+const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.5, .65, 1.15),
+    red
+);
+body.position.y = .8;
+body.castShadow = true;
+car.add(body);
+
+// Cabin
+const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(1.25, .85, 1.05),
+    yellow
+);
+cabin.position.set(-.25, 1.45, 0);
+cabin.castShadow = true;
+car.add(cabin);
+
+// Windows
+const windowMat = new THREE.MeshStandardMaterial({
+    color:0x9de7ff,
+    metalness:.2,
+    roughness:.2
+});
+
+const frontWindow = new THREE.Mesh(
+    new THREE.BoxGeometry(.65,.55,1.08),
+    windowMat
+);
+frontWindow.position.set(.1,1.5,0);
+car.add(frontWindow);
+
+// Wheels
+const wheels = [];
+
+function createWheel(x) {
+    const wheel = new THREE.Mesh(
+        new THREE.CylinderGeometry(.48,.48,.3,24),
+        black
+    );
+
+    wheel.rotation.x = Math.PI/2;
+    wheel.position.set(x,.45,.65);
+    wheel.castShadow = true;
+    car.add(wheel);
+    wheels.push(wheel);
+
+    const hub = new THREE.Mesh(
+        new THREE.CylinderGeometry(.19,.19,.32,16),
+        metal
+    );
+    hub.rotation.x = Math.PI/2;
+    hub.position.copy(wheel.position);
+    car.add(hub);
+}
+
+createWheel(-.85);
+createWheel(.85);
+
+// Headlight
+const light = new THREE.Mesh(
+    new THREE.SphereGeometry(.16,12,12),
+    new THREE.MeshStandardMaterial({
+        color:0xffffaa,
+        emissive:0xffff55,
+        emissiveIntensity:.7
+    })
+);
+light.position.set(1.28,.9,.2);
+car.add(light);
+
+// OBJECTS
+const coins = [];
+const fuels = [];
+const rocks = [];
+
+function createCoin(x) {
+    const coin = new THREE.Mesh(
+        new THREE.TorusGeometry(.35,.11,12,24),
+        new THREE.MeshStandardMaterial({
+            color:0xffd700,
+            metalness:.7,
+            roughness:.2
+        })
+    );
+
+    coin.position.set(x,groundHeight(x)+2,0);
+    coin.castShadow = true;
+    scene.add(coin);
+    coins.push(coin);
+}
+
+function createFuel(x) {
+    const fuel = new THREE.Group();
+
+    const can = new THREE.Mesh(
+        new THREE.BoxGeometry(.65,.8,.5),
+        red
+    );
+    fuel.add(can);
+
+    const cap = new THREE.Mesh(
+        new THREE.BoxGeometry(.25,.13,.25),
+        black
+    );
+    cap.position.y=.46;
+    fuel.add(cap);
+
+    fuel.position.set(x,groundHeight(x)+1.1,0);
+    scene.add(fuel);
+    fuels.push(fuel);
+}
+
+function createRock(x) {
+    const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(.7,0),
+        new THREE.MeshStandardMaterial({color:0x777777})
+    );
+
+    rock.position.set(x,groundHeight(x)+.5,0);
+    rock.castShadow=true;
+    scene.add(rock);
+    rocks.push(rock);
+}
+
+// Generate the course
+for(let x=18; x<3000; x+=10) {
+    if(Math.random()>.35) createCoin(x);
+    if(Math.random()>.93) createFuel(x);
+    if(Math.random()>.91) createRock(x);
+}
+
+// GAME VARIABLES
+let speed = 0;
+let verticalSpeed = 0;
+let fuel = 100;
+let coinCount = 0;
+let gameRunning = false;
+let gameEnded = false;
+let distance = 0;
+
+let forwardPressed = false;
+let reversePressed = false;
+let jumpPressed = false;
+
+let carX = 0;
+let carY = 0;
+
+// UI
+const message = document.getElementById("message");
+const startBtn = document.getElementById("startBtn");
+
+function updateHUD() {
+    document.getElementById("coins").textContent = coinCount;
+    document.getElementById("distance").textContent =
+        Math.max(0, Math.floor(distance));
+
+    document.getElementById("fuelBar").style.width =
+        Math.max(0,fuel) + "%";
+}
+
+function endGame(reason) {
+    gameRunning = false;
+    gameEnded = true;
+    message.style.display = "flex";
+
+    message.innerHTML = `
+        <h1>GAME OVER</h1>
+        <p>${reason}</p>
+        <p>🪙 Coins collected: ${coinCount}</p>
+        <p>Distance: ${Math.floor(distance)} m</p>
+        <button id="startBtn">PLAY AGAIN</button>
+    `;
+
+    document.getElementById("startBtn").addEventListener("click",startGame);
+}
+
+function startGame() {
+    carX = 0;
+    carY = groundHeight(0)+.9;
+    speed = 0;
+    verticalSpeed = 0;
+    fuel = 100;
+    coinCount = 0;
+    distance = 0;
+    gameEnded = false;
+    gameRunning = true;
+
+    message.style.display = "none";
+    updateHUD();
+}
+
+// BUTTON CONTROLS
+function holdButton(id, setter) {
+    const button = document.getElementById(id);
+
+    button.addEventListener("pointerdown", e => {
+        e.preventDefault();
+        setter(true);
+    });
+
+    button.addEventListener("pointerup", () => setter(false));
+    button.addEventListener("pointerleave", () => setter(false));
+    button.addEventListener("pointercancel", () => setter(false));
+}
+
+holdButton("forward", v => forwardPressed=v);
+holdButton("reverse", v => reversePressed=v);
+
+document.getElementById("jump").addEventListener("pointerdown", () => {
+    jumpPressed = true;
+});
+
+document.getElementById("jump").addEventListener("pointerup", () => {
+    jumpPressed = false;
+});
+
+// KEYBOARD
+window.addEventListener("keydown", e => {
+    if(e.key==="ArrowRight" || e.key==="d") forwardPressed=true;
+    if(e.key==="ArrowLeft" || e.key==="a") reversePressed=true;
+    if(e.key===" " || e.key==="ArrowUp") jumpPressed=true;
+});
+
+window.addEventListener("keyup", e => {
+    if(e.key==="ArrowRight" || e.key==="d") forwardPressed=false;
+    if(e.key==="ArrowLeft" || e.key==="a") reversePressed=false;
+    if(e.key===" " || e.key==="ArrowUp") jumpPressed=false;
+});
+
+startBtn.addEventListener("click",startGame);
+
+// MUSIC - original synthesized background tune
+let audioContext;
+let musicTimer;
+let musicStep = 0;
+
+function startMusic() {
+    if(!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    if(audioContext.state === "suspended") audioContext.resume();
+
+    clearInterval(musicTimer);
+
+    const notes = [392,440,494,587,494,440,392,330];
+
+    musicTimer = setInterval(() => {
+        if(!gameRunning) return;
+
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+
+        osc.type = "sine";
+        osc.frequency.value = notes[musicStep % notes.length];
+
+        gain.gain.setValueAtTime(.045,audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(
+            .001,audioContext.currentTime+.22
+        );
+
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+
+        osc.start();
+        osc.stop(audioContext.currentTime+.23);
+
+        musicStep++;
+    },260);
+}
+
+startBtn.addEventListener("click",startMusic);
+
+// PHYSICS AND GAME LOOP
+const clock = new THREE.Clock();
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    const dt = Math.min(clock.getDelta(),.04);
+
+    if(gameRunning) {
+        // Driving
+        if(forwardPressed && fuel>0) {
+            speed += 7*dt;
+            fuel -= .55*dt;
+        }
+
+        if(reversePressed && fuel>0) {
+            speed -= 8*dt;
+            fuel -= .3*dt;
+        }
+
+        speed *= .992;
+        speed = THREE.MathUtils.clamp(speed,-5,16);
+
+        carX += speed*dt;
+        carX = Math.max(0,carX);
+
+        // Jump
+        const ground = groundHeight(carX)+.9;
+
+        if(jumpPressed && Math.abs(carY-ground)<.2) {
+            verticalSpeed = 8;
+        }
+
+        verticalSpeed -= 18*dt;
+        carY += verticalSpeed*dt;
+
+        if(carY < ground) {
+            carY = ground;
+            verticalSpeed = 0;
+        }
+
+        // Car position and hill angle
+        car.position.set(carX,carY,0);
+
+        const slope =
+            (groundHeight(carX+.2)-groundHeight(carX-.2))/.4;
+
+        car.rotation.z = Math.atan(slope)*.8;
+
+        // Wheel rotation
+        wheels.forEach(w => {
+            w.rotation.y -= speed*dt*1.8;
+        });
+
+        // Camera follows the jeep
+        camera.position.x += (carX-camera.position.x)*.08;
+        camera.position.y += (carY+6-camera.position.y)*.05;
+        camera.lookAt(carX+2,carY+1,0);
+
+        // Collect coins
+        coins.forEach(coin => {
+            if(!coin.visible) return;
+
+            coin.rotation.y += dt*2;
+
+            if(Math.abs(coin.position.x-carX)<1.2 &&
+               Math.abs(coin.position.y-carY)<1.5) {
+                coin.visible=false;
+                coinCount++;
+            }
+        });
+
+        // Collect fuel
+        fuels.forEach(can => {
+            if(!can.visible) return;
+
+            can.rotation.y += dt;
+
+            if(Math.abs(can.position.x-carX)<1.3 &&
+               Math.abs(can.position.y-carY)<1.5) {
+                can.visible=false;
+                fuel=Math.min(100,fuel+35);
+            }
+        });
+
+        // Rocks
+        rocks.forEach(rock => {
+            if(!rock.visible) return;
+
+            if(Math.abs(rock.position.x-carX)<1.1 &&
+               Math.abs(rock.position.y-carY)<1.1) {
+                speed *= -.35;
+                rock.visible=false;
+            }
+        });
+
+        distance = carX;
+
+        if(fuel<=0) {
+            fuel=0;
+            endGame("Your jeep ran out of fuel!");
+        }
+
+        if(carY>ground+5 && carY>10) {
+            endGame("Your jeep went off the track!");
+        }
+
+        if(carX>2950) {
+            endGame("Congratulations! You finished the course!");
+        }
+
+        updateHUD();
+    }
+
+    renderer.render(scene,camera);
+}
+
+animate();
+
+// RESIZE
+window.addEventListener("resize", () => {
+    camera.aspect=window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+
+</body>
+</html>
